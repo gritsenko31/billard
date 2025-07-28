@@ -1,7 +1,486 @@
-<div style="position:relative; width:100%; padding-top: 56.25%;">
-  <iframe src="https://roulette31.netlify.app/" 
-          style="position:absolute; top:0; left:0; width:100%; height:100%; border:0;" 
-          allowfullscreen 
-          loading="lazy">
-  </iframe>
-</div>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Свободная пирамида — Игрок vs Игрок</title>
+<style>
+  body {
+    background: #2a2a2a;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select:none;
+    font-family: sans-serif;
+  }
+  #container {
+    display: flex;
+    gap: 20px;
+    background: #1a5e3d;
+    border: 10px solid #8b5a2b;
+    border-radius: 10px;
+    padding: 10px;
+  }
+  canvas {
+    background: #1a5e3d;
+    border-radius: 5px;
+    display: block;
+  }
+  #info {
+    color: white;
+    width: 280px;
+    display: flex;
+    flex-direction: column;
+  }
+  #info > div {
+    margin-bottom: 12px;
+  }
+  #info button {
+    padding: 8px 12px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 5px;
+    border: none;
+    background: #4a7a4a;
+    color: white;
+  }
+  #message {
+    color: #f88;
+    min-height: 40px;
+  }
+  #hint {
+    font-size: 14px;
+    color: #ccc;
+  }
+  label {
+    font-size: 14px;
+    user-select:none;
+  }
+</style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="table" width="800" height="400"></canvas>
+    <div id="info">
+      <div><b>Ходит Игрок <span id="player">1</span></b></div>
+      <div>Счёт — Игрок 1: <span id="score1">0</span>, Игрок 2: <span id="score2">0</span></div>
+      <button id="restartBtn">Рестарт</button>
+      <div id="message"></div>
+      <div id="hint">Правый клик — выбрать биток</div>
+    </div>
+  </div>
+
+<script>
+  const canvas = document.getElementById("table");
+  const ctx = canvas.getContext("2d");
+  const tableWidth = canvas.width;
+  const tableHeight = canvas.height;
+  const ballRadius = 10;
+
+  const pockets = [
+    { x: 0, y: 0 },
+    { x: tableWidth / 2, y: 0 },
+    { x: tableWidth, y: 0 },
+    { x: 0, y: tableHeight },
+    { x: tableWidth / 2, y: tableHeight },
+    { x: tableWidth, y: tableHeight },
+  ];
+  const pocketRadius = 18;
+
+  let balls = [];
+  let cueBallIndex = 0;
+  let isAiming = false;
+  let mouseX = 0, mouseY = 0;
+
+  let scores = [0, 0];
+  let currentPlayer = 0;
+  let ballsPottedThisTurn = 0;
+
+  let foul = false;
+  let cueBallTouched = false;
+  let freeBallPlacement = false;
+
+  let hoveredBallIndex = null;
+
+  let playerChangedThisTurn = false;
+
+  const playerEl = document.getElementById("player");
+  const score1El = document.getElementById("score1");
+  const score2El = document.getElementById("score2");
+  const messageEl = document.getElementById("message");
+
+  function setupBalls() {
+    balls = [];
+    balls.push({ x: 150, y: tableHeight / 2, vx: 0, vy: 0, color: 'white' });
+
+    const startX = 600;
+    const startY = tableHeight / 2;
+    let count = 0;
+    for (let row = 0; row < 5; row++) {
+      for (let i = 0; i <= row; i++) {
+        const x = startX + row * ballRadius * 2 * Math.cos(Math.PI / 6);
+        const y = startY + (i - row / 2) * ballRadius * 2.2;
+        balls.push({ x, y, vx: 0, vy: 0, color: 'beige' });
+        count++;
+        if (count >= 15) return;
+      }
+    }
+  }
+
+  function drawTable() {
+    ctx.fillStyle = '#1a5e3d';
+    ctx.fillRect(0, 0, tableWidth, tableHeight);
+
+    pockets.forEach(({ x, y }) => {
+      ctx.beginPath();
+      ctx.arc(x, y, pocketRadius, 0, Math.PI * 2);
+      ctx.fillStyle = 'black';
+      ctx.fill();
+    });
+  }
+
+  function drawBalls() {
+    balls.forEach((ball, i) => {
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
+      ctx.fillStyle = ball.color;
+      ctx.fill();
+      ctx.strokeStyle = 'black';
+      ctx.stroke();
+
+      if (i === cueBallIndex) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'yellow';
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ballRadius + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+
+      if (i === hoveredBallIndex && i !== cueBallIndex) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'cyan';
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ballRadius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    });
+  }
+
+  function drawCue() {
+    if (!isAiming || cueBallIndex === null || freeBallPlacement) return;
+    const cueBall = balls[cueBallIndex];
+    ctx.beginPath();
+    ctx.moveTo(cueBall.x, cueBall.y);
+    ctx.lineTo(mouseX, mouseY);
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function draw() {
+    drawTable();
+    drawBalls();
+    drawCue();
+  }
+
+  function handleCollisions() {
+    for (let i = 0; i < balls.length; i++) {
+      const ballA = balls[i];
+      for (let j = i + 1; j < balls.length; j++) {
+        const ballB = balls[j];
+        const dx = ballB.x - ballA.x;
+        const dy = ballB.y - ballA.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = ballRadius * 2;
+
+        if (dist < minDist) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+
+          const pA = ballA.vx * nx + ballA.vy * ny;
+          const pB = ballB.vx * nx + ballB.vy * ny;
+
+          const optimizedP = (2 * (pA - pB)) / 2;
+
+          ballA.vx -= optimizedP * nx;
+          ballA.vy -= optimizedP * ny;
+          ballB.vx += optimizedP * nx;
+          ballB.vy += optimizedP * ny;
+
+          const overlap = minDist - dist;
+          ballA.x -= nx * overlap / 2;
+          ballA.y -= ny * overlap / 2;
+          ballB.x += nx * overlap / 2;
+          ballB.y += ny * overlap / 2;
+
+          if (i === cueBallIndex || j === cueBallIndex) cueBallTouched = true;
+        }
+      }
+    }
+  }
+
+  function handleWallBounces() {
+    const restitution = 0.9;
+
+    balls.forEach(ball => {
+      if (ball.x - ballRadius < 0) {
+        ball.x = ballRadius;
+        ball.vx = -ball.vx * restitution;
+      }
+      if (ball.x + ballRadius > tableWidth) {
+        ball.x = tableWidth - ballRadius;
+        ball.vx = -ball.vx * restitution;
+      }
+      if (ball.y - ballRadius < 0) {
+        ball.y = ballRadius;
+        ball.vy = -ball.vy * restitution;
+      }
+      if (ball.y + ballRadius > tableHeight) {
+        ball.y = tableHeight - ballRadius;
+        ball.vy = -ball.vy * restitution;
+      }
+    });
+  }
+
+  function updateBalls() {
+    balls.forEach(ball => {
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+      let frictionCoef = speed < 1 ? 0.90 : 0.98;
+
+      ball.vx *= frictionCoef;
+      ball.vy *= frictionCoef;
+
+      if (Math.abs(ball.vx) < 0.01) ball.vx = 0;
+      if (Math.abs(ball.vy) < 0.01) ball.vy = 0;
+    });
+  }
+
+  function handlePockets() {
+    for (let i = balls.length - 1; i >= 0; i--) {
+      const ball = balls[i];
+      for (const pocket of pockets) {
+        const dx = ball.x - pocket.x;
+        const dy = ball.y - pocket.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < pocketRadius) {
+          const ballWasCue = (i === cueBallIndex);
+          balls.splice(i, 1);
+
+          if (ballWasCue) {
+            foul = true;
+            cueBallIndex = null;
+          } else if (!foul) {
+            ballsPottedThisTurn++;
+            scores[currentPlayer]++;
+          }
+          break;
+        }
+      }
+    }
+    if (cueBallIndex === null && balls.length > 0 && !freeBallPlacement) {
+      cueBallIndex = 0;
+    }
+  }
+
+  function ballsAreMoving() {
+    return balls.some(ball => ball.vx !== 0 || ball.vy !== 0);
+  }
+
+  function updateScores() {
+    score1El.textContent = scores[0];
+    score2El.textContent = scores[1];
+  }
+  function updateCurrentPlayer() {
+    playerEl.textContent = currentPlayer + 1;
+  }
+
+  function showMessage(text) {
+    messageEl.textContent = text;
+  }
+  function clearMessage() {
+    messageEl.textContent = "";
+  }
+
+  function resetGame() {
+    setupBalls();
+    scores = [0, 0];
+    currentPlayer = 0;
+    ballsPottedThisTurn = 0;
+    foul = false;
+    cueBallTouched = false;
+    freeBallPlacement = false;
+    cueBallIndex = 0;
+    clearMessage();
+    updateScores();
+    updateCurrentPlayer();
+  }
+
+  canvas.addEventListener("click", e => {
+    if (!freeBallPlacement) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    let collision = balls.some(ball => {
+      const dx = clickX - ball.x;
+      const dy = clickY - ball.y;
+      return Math.sqrt(dx * dx + dy * dy) < ballRadius * 2;
+    });
+
+    if (!collision) {
+      balls.push({ x: clickX, y: clickY, vx: 0, vy: 0, color: 'white' });
+      cueBallIndex = balls.length - 1;
+      freeBallPlacement = false;
+      clearMessage();
+    } else {
+      showMessage("Нельзя ставить биток на другой шар!");
+    }
+  });
+
+  canvas.addEventListener("contextmenu", e => {
+    e.preventDefault();
+
+    if (freeBallPlacement) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    let minDist = Infinity;
+    let closestBallIndex = null;
+
+    const selectionRadius = ballRadius * 2;
+
+    for (let i = 0; i < balls.length; i++) {
+      const ball = balls[i];
+      const dx = clickX - ball.x;
+      const dy = clickY - ball.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= selectionRadius && dist < minDist) {
+        minDist = dist;
+        closestBallIndex = i;
+      }
+    }
+
+    if (closestBallIndex !== null) {
+      cueBallIndex = closestBallIndex;
+    }
+  });
+
+  window.addEventListener("mousemove", e => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+    // mouseX, mouseY могут выходить за пределы canvas
+
+    // Обновление hoveredBallIndex (будет null вне поля)
+    let minDist = Infinity;
+    let closestBallIndex = null;
+
+    for (let i = 0; i < balls.length; i++) {
+      const ball = balls[i];
+      const dx = mouseX - ball.x;
+      const dy = mouseY - ball.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= ballRadius && dist < minDist) {
+        minDist = dist;
+        closestBallIndex = i;
+      }
+    }
+    hoveredBallIndex = closestBallIndex;
+  });
+
+  canvas.addEventListener("mousedown", e => {
+    if (freeBallPlacement) return;
+    if (e.button !== 0) return;
+    if (cueBallIndex === null) return;
+
+    isAiming = true;
+  });
+
+  canvas.addEventListener("mouseup", e => {
+    if (!isAiming || cueBallIndex === null || freeBallPlacement) return;
+
+    const cueBall = balls[cueBallIndex];
+    const dx = cueBall.x - mouseX;
+    const dy = cueBall.y - mouseY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const force = Math.min(dist / 10, 15);
+
+    cueBall.vx = (dx / dist) * force;
+    cueBall.vy = (dy / dist) * force;
+
+    isAiming = false;
+  });
+
+  document.getElementById("restartBtn").addEventListener("click", () => {
+    resetGame();
+  });
+
+  function gameLoop() {
+    updateBalls();
+    handleCollisions();
+    handleWallBounces();
+    handlePockets();
+    draw();
+
+    if (!ballsAreMoving()) {
+      if (freeBallPlacement) {
+        requestAnimationFrame(gameLoop);
+        return;
+      }
+
+      if (!playerChangedThisTurn) {
+        // Меняем игрока только если это необходимо
+        if (!foul) {
+          if (ballsPottedThisTurn === 0) {
+            currentPlayer = 1 - currentPlayer;
+            updateCurrentPlayer();
+          }
+        } else {
+          currentPlayer = 1 - currentPlayer;
+          updateCurrentPlayer();
+          freeBallPlacement = true;
+          showMessage(`Фол! Игрок ${currentPlayer + 1} ставит биток вручную.`);
+        }
+        playerChangedThisTurn = true;
+      }
+
+      ballsPottedThisTurn = 0;
+      foul = false;
+      cueBallTouched = false;
+
+      updateScores();
+      clearMessage();
+
+      if (scores[0] >= 8) {
+        alert("Игрок 1 выиграл!");
+        resetGame();
+        return;
+      }
+      if (scores[1] >= 8) {
+        alert("Игрок 2 выиграл!");
+        resetGame();
+        return;
+      }
+    } else {
+      playerChangedThisTurn = false; // Пока шары движутся, сбрасываем флаг смены игрока
+    }
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  resetGame();
+  gameLoop();
+</script>
+</body>
+</html>
